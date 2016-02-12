@@ -1,21 +1,21 @@
 /* -*- tab-width: 4; indent-tabs-mode: t -*- */
 /* tssplitter_lite.c -- split TS stream.
 
-   Copyright 2009 querulous
-   Copyright 2010 Naoya OYAMA <naoya.oyama@gmail.com>
+	Copyright 2009 querulous
+	Copyright 2010 Naoya OYAMA <naoya.oyama@gmail.com>
 
-   This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
-   (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
 
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-   You should have received a copy of the GNU General Public License
-   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -146,6 +146,7 @@ splitter* split_startup(
 		return NULL;
 	}
 	memset(sp->pids, 0, sizeof(sp->pids));
+	memset(sp->retain_pids, 0, sizeof(sp->retain_pids));
 	memset(sp->pmt_pids, 0, sizeof(sp->pmt_pids));
 
 	sp->sid_list	= NULL;
@@ -272,8 +273,8 @@ static int RescanPID(splitter *splitter, unsigned char *buf)
 
 	// clear
 	if (splitter->pmt_counter == splitter->pmt_retain) {
-	    memcpy(splitter->pids, splitter->pmt_pids, sizeof(splitter->pids));
-	    splitter->pmt_counter = 0;
+		memcpy(splitter->pids, splitter->pmt_pids, sizeof(splitter->pids));
+		splitter->pmt_counter = 0;
 		memset(splitter->section_remain, 0U, sizeof(splitter->section_remain));
 		memset(splitter->packet_seq, 0U, sizeof(splitter->packet_seq));
 
@@ -281,15 +282,15 @@ static int RescanPID(splitter *splitter, unsigned char *buf)
 	}
 
 	if (TSS_SUCCESS == AnalyzePmt(splitter, buf, 2)) {
-	    splitter->pmt_counter += 1;
+		splitter->pmt_counter += 1;
 	}
 
  	if (splitter->pmt_retain == splitter->pmt_counter) {
-	    result = TSS_SUCCESS;
+		result = TSS_SUCCESS;
 		for (i = 0; MAX_PID > i; i++) {
-		    if (splitter->pids[i] > 0) {
-			    splitter->pids[i] -= 1;
-		    }
+			if (splitter->pids[i] > 0) {
+				splitter->pids[i] -= 1;
+			}
 		}
 		fprintf(stderr, "Rescan PID End\n");
 	}
@@ -345,31 +346,31 @@ int split_ts(
 			dbuf->buffer_filled += LENGTH_PACKET;
 			break;
 		default:
-		    if(0 != splitter->pmt_pids[pid]) {
-			    //PMT
-			    if ((sptr + s_offset)[1] & 0x40) {		// PES開始インジケータ
-				    // バージョンチェック
-				    for(pmts = 0; splitter->pmt_retain > pmts; pmts++) {
-					    if (splitter->pmt_version[pmts].pid == pid) {
+			if(0 != splitter->pmt_pids[pid]) {
+				//PMT
+				if ((sptr + s_offset)[1] & 0x40) {		// PES開始インジケータ
+					// バージョンチェック
+					for(pmts = 0; splitter->pmt_retain > pmts; pmts++) {
+						if (splitter->pmt_version[pmts].pid == pid) {
 						  version = splitter->pmt_version[pmts].version;
 						  break;
 						}
 					}
 					if((version != ((sptr + s_offset)[10] & 0x3e))
 					   ||(splitter->pmt_retain != splitter->pmt_counter)) {
-					    // 再チェック
-					    result = RescanPID(splitter, sptr + s_offset);
+						// 再チェック
+						result = RescanPID(splitter, sptr + s_offset);
 					}
 				}
 				else {
-				    if (splitter->pmt_retain != splitter->pmt_counter) {
-					    // 再チェック
-					    result = RescanPID(splitter, sptr + s_offset);
+					if (splitter->pmt_retain != splitter->pmt_counter) {
+						// 再チェック
+						result = RescanPID(splitter, sptr + s_offset);
 					}
 				}
 			}
 			/* pids[pid] が 1 は残すパケットなので書き込む */
-			if(0 != splitter->pids[pid]) {
+			if(0 != splitter->pids[pid] || 0 != splitter->retain_pids[pid]) {
 				memcpy(dptr + d_offset, sptr + s_offset, LENGTH_PACKET);
 				d_offset += LENGTH_PACKET;
 				dbuf->buffer_filled += LENGTH_PACKET;
@@ -393,6 +394,7 @@ static int AnalyzePat(splitter *sp, unsigned char *buf)
 	splitter *sp
 		unsigned char** pat,				// [out]	PAT 情報（再構築後）
 		unsigned char* pids,				// [out]	出力対象 PID 情報
+		unsigned char* retain_pids,		// [out]	出力対象 PID
 		char** sid_list,					// [in]		出力対象サービス ID のリスト
 		unsigned char* pmt_pids,			// [out]	サービス ID に対応する PMT の PID
 		int* pmt_retain						// [out]	残すPMTの数
@@ -412,6 +414,7 @@ static int AnalyzePat(splitter *sp, unsigned char *buf)
 
 	unsigned char *pat = sp->pat;
 	unsigned char *pids = sp->pids;
+	unsigned char *retain_pids = sp->retain_pids;
 	char **sid_list = sp->sid_list;
 	unsigned char *pmt_pids = sp->pmt_pids;
 
@@ -528,18 +531,33 @@ static int AnalyzePat(splitter *sp, unsigned char *buf)
 				}
 				else if(!strcasecmp(*p, "epg")) {
 					/* epg抽出に必要なPIDのみを保存する */
-					sid_found    = TRUE;
-					*(pids+0x11) = 1;
-					*(pids+0x12) = 1;
-					*(pids+0x23) = 1;         // SDTT
-					*(pids+0x29) = 1;         // CDT
+					sid_found	= TRUE;
+					*(retain_pids+0x11) = 1;
+					*(retain_pids+0x12) = 1;
+					*(retain_pids+0x23) = 1;		 // SDTT
+					*(retain_pids+0x29) = 1;		 // CDT
 				}
 				else if(!strcasecmp(*p, "epg1seg")) {
 					/* ワンセグ用epg抽出に必要なPIDのみを保存する */
-					sid_found    = TRUE;
-					*(pids+0x11) = 1;
-//					*(pids+0x26) = 1;         // 車載用epg 規格のみで未送出のもよう
-					*(pids+0x27) = 1;
+					sid_found	= TRUE;
+					*(retain_pids+0x11) = 1;
+//					*(pids+0x26) = 1;		 // 車載用epg 規格のみで未送出のもよう
+					*(retain_pids+0x27) = 1;
+				}
+				else if(!strcasecmp(*p, "epg1seg")) {
+					/* ワンセグ用epg抽出に必要なPIDのみを保存する */
+					sid_found	= TRUE;
+					*(retain_pids+0x10) = 1;
+					*(retain_pids+0x11) = 1;
+					*(retain_pids+0x12) = 1;
+					*(retain_pids+0x13) = 1;
+					*(retain_pids+0x14) = 1;
+					*(retain_pids+0x22) = 1;
+					*(retain_pids+0x24) = 1;
+					*(retain_pids+0x25) = 1;
+					*(retain_pids+0x26) = 1;
+					*(retain_pids+0x27) = 1;
+					*(retain_pids+0x2E) = 1;
 				}
 
 				p++;
@@ -571,7 +589,7 @@ static int AnalyzePat(splitter *sp, unsigned char *buf)
 		for(k=0; k < sp->num_pmts; k++)
 			fprintf(stderr, "%d ", avail_sids[k]);
 		fprintf(stderr, "\n");
-		fprintf(stderr, "Chosen sid    =%s\n", chosen_sid);
+		fprintf(stderr, "Chosen sid	=%s\n", chosen_sid);
 
 #if 1
 		/* print PMTs */
@@ -668,7 +686,7 @@ static int RecreatePat(splitter *sp, unsigned char *buf, int *pos)
 	(sp->pat)[5 + LENGTH_PAT_HEADER + pid_num*4] = (crc >> 24) & 0xFF;
 	(sp->pat)[6 + LENGTH_PAT_HEADER + pid_num*4] = (crc >> 16) & 0xFF;
 	(sp->pat)[7 + LENGTH_PAT_HEADER + pid_num*4] = (crc >>  8) & 0xFF;
-	(sp->pat)[8 + LENGTH_PAT_HEADER + pid_num*4] = (crc      ) & 0xFF;
+	(sp->pat)[8 + LENGTH_PAT_HEADER + pid_num*4] = (crc	  ) & 0xFF;
 
 	return(TSS_SUCCESS);
 }
@@ -699,8 +717,8 @@ static int AnalyzePmt(splitter *sp, unsigned char *buf, unsigned char mark)
 		payload_offset = 5;
 
 		for (count = 0; sp->pmt_retain > count; count++) {
-		    if (sp->pmt_version[count].pid  == pid) {
-                sp->pmt_version[count].version = buf[10] & 0x3e;
+			if (sp->pmt_version[count].pid  == pid) {
+				sp->pmt_version[count].version = buf[10] & 0x3e;
 			}
 		}
 		// PCR, 番組情報が先頭からはみ出ることはないだろう
